@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { useDebounceFn } from "@vueuse/core"
-
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isCameraActive = ref(false)
