@@ -129,12 +129,51 @@ const updateSimilarityClass = (percentage: number) => {
 const startCamera = async () => {
   try {
     errorMessage.value = ""
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
+
+    // Try different camera configurations in order of preference
+    const cameraConfigs = [
+      // First try: Rear camera (for phones)
+      {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "environment",
+        },
       },
-    })
+      // Second try: Front camera (for laptops)
+      {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user",
+        },
+      },
+      // Fallback: Any available camera
+      {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      },
+    ]
+
+    let stream = null
+    let lastError = null
+
+    // Try each configuration until one works
+    for (const config of cameraConfigs) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(config)
+        break // Success, exit the loop
+      } catch (error) {
+        lastError = error
+        continue // Try next configuration
+      }
+    }
+
+    if (!stream) {
+      throw lastError || new Error("No camera available")
+    }
 
     if (videoRef.value) {
       videoRef.value.srcObject = stream
