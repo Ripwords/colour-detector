@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useDebounceFn } from "@vueuse/core"
+
 const videoRef = ref<HTMLVideoElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isCameraActive = ref(false)
@@ -16,21 +18,101 @@ let capturedImageData: ImageData | null = null
 // Computed properties for target color
 const targetRgb = computed(() => {
   const hex = targetColor.value.replace("#", "")
-  const r = parseInt(hex.substr(0, 2), 16)
-  const g = parseInt(hex.substr(2, 2), 16)
-  const b = parseInt(hex.substr(4, 2), 16)
+  const r = parseInt(hex.substring(0, 2), 16)
+  const g = parseInt(hex.substring(2, 4), 16)
+  const b = parseInt(hex.substring(4, 6), 16)
   return `${r}, ${g}, ${b}`
 })
 
-// Color similarity calculation using Euclidean distance
-const calculateSimilarity = (color1: number[], color2: number[]): number => {
-  const maxDistance = Math.sqrt(255 * 255 + 255 * 255 + 255 * 255) // Maximum possible distance
-  const distance = Math.sqrt(
-    Math.pow((color1?.[0] ?? 0) - (color2?.[0] ?? 0), 2) +
-      Math.pow((color1?.[1] ?? 0) - (color2?.[1] ?? 0), 2) +
-      Math.pow((color1?.[2] ?? 0) - (color2?.[2] ?? 0), 2)
+// Color space conversion utilities
+const gammaCorrection = (c: number): number => {
+  const normalized = c / 255
+  return normalized <= 0.04045
+    ? normalized / 12.92
+    : Math.pow((normalized + 0.055) / 1.055, 2.4)
+}
+
+const rgbToXyz = (
+  r: number,
+  g: number,
+  b: number
+): [number, number, number] => {
+  const rLinear = gammaCorrection(r)
+  const gLinear = gammaCorrection(g)
+  const bLinear = gammaCorrection(b)
+
+  const x = 0.4124 * rLinear + 0.3576 * gLinear + 0.1805 * bLinear
+  const y = 0.2126 * rLinear + 0.7152 * gLinear + 0.0722 * bLinear
+  const z = 0.0193 * rLinear + 0.1192 * gLinear + 0.9505 * bLinear
+
+  return [x, y, z]
+}
+
+const xyzToLab = (
+  x: number,
+  y: number,
+  z: number
+): [number, number, number] => {
+  // D65 white point
+  const xn = 0.95047
+  const yn = 1.0
+  const zn = 1.08883
+
+  const f = (t: number): number => {
+    const delta = 6 / 29
+    return t > Math.pow(delta, 3)
+      ? Math.pow(t, 1 / 3)
+      : t / (3 * Math.pow(delta, 2)) + 4 / 29
+  }
+
+  const l = 116 * f(y / yn) - 16
+  const a = 500 * (f(x / xn) - f(y / yn))
+  const b = 200 * (f(y / yn) - f(z / zn))
+
+  return [l, a, b]
+}
+
+const rgbToLab = (
+  r: number,
+  g: number,
+  b: number
+): [number, number, number] => {
+  const [x, y, z] = rgbToXyz(r, g, b)
+  return xyzToLab(x, y, z)
+}
+
+const deltaE76 = (
+  lab1: [number, number, number],
+  lab2: [number, number, number]
+): number => {
+  const [l1, a1, b1] = lab1
+  const [l2, a2, b2] = lab2
+
+  return Math.sqrt(
+    Math.pow(l1 - l2, 2) + Math.pow(a1 - a2, 2) + Math.pow(b1 - b2, 2)
   )
-  return Math.max(0, 100 - (distance / maxDistance) * 100)
+}
+
+// Color similarity calculation using Delta E in CIE Lab space
+const calculateSimilarity = (color1: number[], color2: number[]): number => {
+  const lab1 = rgbToLab(color1?.[0] ?? 0, color1?.[1] ?? 0, color1?.[2] ?? 0)
+  const lab2 = rgbToLab(color2?.[0] ?? 0, color2?.[1] ?? 0, color2?.[2] ?? 0)
+
+  const deltaE = deltaE76(lab1, lab2)
+
+  // Delta E to similarity percentage mapping
+  // Delta E < 2.3: Not perceptible (100% similarity)
+  // Delta E > 100: Very noticeable (0% similarity)
+  const maxDeltaE = 100
+  const minDeltaE = 2.3
+
+  if (deltaE <= minDeltaE) return 100
+  if (deltaE >= maxDeltaE) return 0
+
+  return Math.max(
+    0,
+    100 - ((deltaE - minDeltaE) / (maxDeltaE - minDeltaE)) * 100
+  )
 }
 
 // Update similarity class based on percentage
@@ -161,9 +243,9 @@ const analyzeCapturedFrame = () => {
 
     // Calculate similarity with target color
     const targetHex = targetColor.value.replace("#", "")
-    const targetR = parseInt(targetHex.substr(0, 2), 16)
-    const targetG = parseInt(targetHex.substr(2, 2), 16)
-    const targetB = parseInt(targetHex.substr(4, 2), 16)
+    const targetR = parseInt(targetHex.substring(0, 2), 16)
+    const targetG = parseInt(targetHex.substring(2, 4), 16)
+    const targetB = parseInt(targetHex.substring(4, 6), 16)
 
     const similarity = calculateSimilarity(
       [r, g, b],
@@ -235,9 +317,9 @@ const startColorDetection = () => {
 
       // Calculate similarity with target color
       const targetHex = targetColor.value.replace("#", "")
-      const targetR = parseInt(targetHex.substr(0, 2), 16)
-      const targetG = parseInt(targetHex.substr(2, 2), 16)
-      const targetB = parseInt(targetHex.substr(4, 2), 16)
+      const targetR = parseInt(targetHex.substring(0, 2), 16)
+      const targetG = parseInt(targetHex.substring(2, 4), 16)
+      const targetB = parseInt(targetHex.substring(4, 6), 16)
 
       const similarity = calculateSimilarity(
         [r, g, b],
